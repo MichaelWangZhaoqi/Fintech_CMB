@@ -1,0 +1,159 @@
+#coding=gbk
+import numpy as np
+import pandas as pd
+import os
+import pickle
+os.getcwd()
+
+def read(path):
+    files = np.sort(os.listdir(path))
+
+    #print(files)
+    dframes=[]
+    for file in files:
+        dframe = pd.read_csv(path+"/"+file)
+        dframes.append(dframe)
+    return dframes
+
+
+
+df_train=read("/clever/data/da0023"+"/train")
+df_test=read("/clever/data/da0023"+"/test")
+
+
+data_price = df_train[-1]
+data_price = data_price.fillna(0)
+date_list=['2006-01-04','2006-02-01','2006-03-01','2006-04-01','2006-05-03','2006-06-01','2006-07-01','2006-08-01','2006-09-01','2006-10-10','2006-11-01','2006-12-01','2007-01-04','2007-02-01','2007-03-01','2007-04-05','2007-05-02','2007-06-01','2007-07-02','2007-08-01','2007-09-03','2007-10-08','2007-11-01','2007-12-03','2008-01-04','2008-02-01','2008-03-01','2008-04-01','2008-05-02','2008-06-03','2008-07-01','2008-08-01','2008-09-02','2008-10-08','2008-11-01','2008-12-02','2009-01-02','2009-02-07','2009-03-03','2009-04-01','2009-05-05','2009-06-03','2009-07-01','2009-08-01','2009-09-01','2009-10-08','2009-11-03','2009-12-01','2010-01-05','2010-02-02','2010-03-02','2010-04-01','2010-05-04','2010-06-01','2010-07-01','2010-08-03','2010-09-01','2010-10-08','2010-11-02','2010-12-01','2011-01-04','2011-02-01','2011-03-01','2011-04-01','2011-05-03','2011-06-01','2011-07-01','2011-08-01','2011-09-01','2011-10-10','2011-11-01','2011-12-01','2012-01-03','2012-02-03','2012-03-01','2012-04-05','2012-05-02','2012-06-01','2012-07-03','2012-08-01','2012-09-01','2012-10-09','2012-11-01','2012-12-01']
+new_train_dataset=[]
+files = np.sort(os.listdir("/clever/data/da0023"+"/train"))
+for i in range(len(df_train[:-2])):
+    try:
+        A=np.array(data_price[data_price['time']==date_list[i]])
+        AA=np.array(data_price[data_price['time']==date_list[i+1]])
+    except:
+        continue
+    #data_price.columns.tolist()
+    B=pd.DataFrame(A.reshape(-1,1),index=data_price[data_price['time']==date_list[i]].columns.tolist(),columns=['start_price'])
+    BB=pd.DataFrame(AA.reshape(-1,1),index=data_price[data_price['time']==date_list[i+1]].columns.tolist(),columns=['end_price'])
+    C=B.drop('time')
+    CC=BB.drop('time')
+    #df_train[i]=df_train[i].fillna(0)
+    AA=df_train[i]
+    for j in range(len(AA['code'])):
+        AA.loc[j,'code']=str(AA.loc[j,'code'])
+    D=pd.concat([AA.set_index('code'),C,CC],join='inner',axis=1)
+    E=D.dropna(subset=["start_price","end_price"])
+    E['month'] = files[i][:10]
+    E['code']=np.array(E.index.tolist())
+    E.drop('Unnamed: 0',axis=1,inplace=True)
+    new_train_dataset.append(E)
+
+
+new_train_dataset[30].head()
+#df_train[10]
+
+
+all_train_data=pd.concat([new_train_dataset[i] for i in range(len(new_train_dataset))], ignore_index=True)
+
+raw_data = all_train_data
+
+raw_data['is_up'] = (raw_data['end_price']>raw_data['start_price'])+0
+raw_data['return'] = (raw_data['end_price']-raw_data['start_price'])/raw_data['start_price']
+raw_data = raw_data.drop('capitalization',axis=1)
+raw_data = raw_data.drop('circulating_cap',axis=1)
+raw_data.sort_values(by=['code','month'] , ascending=True, inplace=True)
+
+
+import os
+import numpy as np
+import random
+import matplotlib.pyplot as plt
+import pandas as pd
+import time
+import pickle
+import warnings
+from sklearn.externals import joblib
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import Imputer, scale        # take care of mississing data
+from sklearn.linear_model import LinearRegression, Lasso, LassoCV, LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from sklearn.metrics import classification_report, accuracy_score, mean_squared_error, roc_auc_score
+from sklearn.model_selection import GridSearchCV
+%matplotlib inline
+warnings.filterwarnings('ignore')
+
+raw_data=raw_data.dropna(axis=0)
+train=scale(raw_data.iloc[:,:-6])
+label_is_up=raw_data.iloc[:,-2]
+label_return=raw_data.iloc[:,-1]
+X_train, X_test, y_train_1, y_test_1 = train_test_split(train, label_is_up, test_size=0.1, random_state=100)
+X_train, X_test, y_train_2, y_test_2 = train_test_split(train, label_return, test_size=0.1, random_state=100)
+
+#使用参数筛选后的GBDT
+#使用GridSearchCV筛选参数
+#GBDT
+start=time.clock()
+parameters = {'n_estimators':range(20,101,20),'learning_rate':[0.01,0.1]}
+gbdt = GridSearchCV(GradientBoostingClassifier(), param_grid = parameters, scoring='roc_auc', iid=False, cv=None, n_jobs=-1)
+gbdt.fit(X_train, y_train_1)
+
+gbdt = gbdt.fit(X_train, y_train_1)
+#保存模型 方便下次调用
+joblib.dump(gbdt,'gbdt.model')
+end=(time.clock()-start)
+print("Training spent time: ",end)
+
+gbdt=joblib.load('gbdt.model')
+prediction = gbdt.predict(X_test)
+prediction=prediction.reshape(-1,1)
+print(prediction.shape)
+print('预测准确率为：%.2f%%' %(accuracy_score(y_test_1,prediction)*100))
+print("AUC Score (Test): %f" % roc_auc_score(y_test_1, gbdt.predict_proba(X_test)[:,1]))
+print(classification_report(y_test_1,prediction))
+print('预测数据中含有%d个涨，%d个跌' %(sum(prediction), len(prediction)-sum(prediction)))
+print('真实测试集含有%d个涨，%d个跌' %(sum(y_test_1), len(y_test_1)-sum(y_test_1)))
+
+#随机森林
+start=time.clock()
+rf = RandomForestClassifier(n_estimators = 100, warm_start=True, oob_score=True)
+rf0315=rf.fit(X_train,y_train_1)
+#保存模型 方便下次调用
+joblib.dump(rf0315,'rf20190315.model')
+end=(time.clock()-start)
+print("Training spent time: ",end)
+
+rf0315=joblib.load('rf20190315.model')
+prediction = rf0315.predict(X_test)
+prediction=prediction.reshape(-1,1)
+print(prediction.shape)
+print('预测准确率为：%.2f%%' %(accuracy_score(y_test_1,prediction)*100))
+print(classification_report(y_test_1,prediction))
+print('预测数据中含有%d个涨，%d个跌' %(sum(prediction), len(prediction)-sum(prediction)))
+print('真实测试集含有%d个涨，%d个跌' %(sum(y_test_1), len(y_test_1)-sum(y_test_1)))
+print("AUC Score (Test): %f" % roc_auc_score(np.array(y_test_1).reshape(-1,1), rf0315.predict_proba(X_test)[:,1]))
+
+##ensemble
+
+GBDT_list=['stock_id']
+temp=pd.Series(GBDT_list)
+for i in range(len(df_test)):
+    test_data=df_test[i].set_index('Unnamed: 0').iloc[:,1:].fillna(0)
+    test_data = test_data.drop('capitalization',axis=1)
+    test_data = test_data.drop('circulating_cap',axis=1)
+    gbdt_prob = gbdt.predict_proba(test_data)[:,1]
+    gbdt_prob = gbdt_prob.reshape(-1,1)
+    rf_prob = rf0315.predict_proba(test_data)[:,1]
+    rf_prob = rf_prob.reshape(-1,1)
+    en_prob = gbdt_prob+rf_prob
+    res=pd.concat([df_test[i],pd.DataFrame(en_prob, columns=['prob'])],axis=1)
+    #print(res)
+    #result=res.nlargest(20, 'prob')['code']
+    result=res.nsmallest(20, 'prob')['code']
+    #print(result)
+    temp=pd.concat([temp,result],ignore_index=True)
+print(temp)
+
+
+test_txt = temp
+test_txt.to_csv('test_rev.txt', sep='\n', index=False)
